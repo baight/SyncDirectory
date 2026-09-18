@@ -1,0 +1,11 @@
+node_modules
+out
+.DS_Store
+Thumbs.db
+.eslintcache
+*.log*
+disk/
+.trae/
+
+# 本地同步配置（含个人目录路径，勿提交）
+syncdirectory.config.json*

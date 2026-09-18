@@ -1,0 +1,20 @@
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #303133;
+  background-color: #f2f3f5;
+}
+
+/* el-tooltip 内容换行宽度（popper 挂载在 body 下，需全局样式） */
+.tooltip-wrap {
+  max-width: 300px;
+  line-height: 1.6;
+}
