@@ -1,14 +1,36 @@
 import { app } from 'electron'
 import { dirname, join } from 'path'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import type { SyncConfigItem, SyncConfigsFile } from '@shared/sync-types'
 
-/** 配置文件路径：打包后放 exe 同级目录，开发模式放项目根目录 */
-export function resolveConfigFilePath(): string {
-  if (app.isPackaged) {
-    return join(dirname(app.getPath('exe')), 'syncdirectory.config.json')
+/** 旧版配置文件位置（exe 同级目录 / 开发模式项目根目录），用于自动迁移 */
+function legacyConfigPaths(): string[] {
+  const paths = [join(dirname(app.getPath('exe')), 'syncdirectory.config.json')]
+  if (!app.isPackaged) {
+    paths.push(join(app.getAppPath(), 'syncdirectory.config.json'))
   }
-  return join(app.getAppPath(), 'syncdirectory.config.json')
+  return paths
+}
+
+/** 配置文件路径：用户数据目录（%APPDATA%/SyncDirectory），升级或重装应用后配置保留。
+ * 首次运行时自动从旧位置（exe 同级目录）迁移 */
+export function resolveConfigFilePath(): string {
+  const dir = app.getPath('userData')
+  mkdirSync(dir, { recursive: true })
+  const filePath = join(dir, 'syncdirectory.config.json')
+  if (!existsSync(filePath)) {
+    for (const legacy of legacyConfigPaths()) {
+      if (existsSync(legacy)) {
+        try {
+          copyFileSync(legacy, filePath)
+        } catch {
+          // 迁移失败则从空配置开始
+        }
+        break
+      }
+    }
+  }
+  return filePath
 }
 
 /** 配置列表持久化（JSON，原子写） */

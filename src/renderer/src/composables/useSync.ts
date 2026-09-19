@@ -45,6 +45,8 @@ interface SyncStore {
   startSync(): Promise<void>
   cancelSync(): Promise<void>
   restoreRunningJob(): Promise<void>
+  openPath(path: string): Promise<void>
+  showInFolder(path: string): Promise<void>
 }
 
 function emptyForm(): SyncForm {
@@ -265,6 +267,24 @@ export function useSync(): SyncStore {
     }
   }
 
+  /** 用系统默认程序打开文件/目录 */
+  async function openPath(path: string): Promise<void> {
+    try {
+      await window.api.openPath(path)
+    } catch (err) {
+      ElMessage.error(errMessage(err))
+    }
+  }
+
+  /** 在资源管理器中定位文件/目录 */
+  async function showInFolder(path: string): Promise<void> {
+    try {
+      await window.api.showInFolder(path)
+    } catch (err) {
+      ElMessage.error(errMessage(err))
+    }
+  }
+
   const unlisten = window.api.onSyncProgress((p) => Object.assign(progress, p))
   onScopeDispose(unlisten)
 
@@ -289,6 +309,8 @@ export function useSync(): SyncStore {
     generatePlan,
     startSync,
     cancelSync,
-    restoreRunningJob
+    restoreRunningJob,
+    openPath,
+    showInFolder
   }
 }

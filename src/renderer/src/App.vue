@@ -27,7 +27,9 @@ const {
   generatePlan,
   startSync,
   cancelSync,
-  restoreRunningJob
+  restoreRunningJob,
+  openPath,
+  showInFolder
 } = useSync()
 
 onMounted(() => {
@@ -75,7 +77,9 @@ async function handleDeleteConfig(id: string): Promise<void> {
         :result="result"
         @cancel="cancelSync"
       />
-      <PlanPreviewPanel :plan="plan" />
+      <div class="preview-area">
+        <PlanPreviewPanel :plan="plan" @open="openPath" @reveal="showInFolder" />
+      </div>
     </el-main>
   </el-container>
 </template>
@@ -94,10 +98,19 @@ async function handleDeleteConfig(id: string): Promise<void> {
 
 .main {
   padding: 12px 16px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .main > .el-card + .el-card {
   margin-top: 12px;
+}
+
+.preview-area {
+  flex: 1;
+  min-height: 220px;
+  margin-top: 12px;
+  display: flex;
 }
 </style>

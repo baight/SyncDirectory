@@ -6,6 +6,11 @@ const props = defineProps<{
   plan: SyncPlan | null
 }>()
 
+const emit = defineEmits<{
+  open: [path: string]
+  reveal: [path: string]
+}>()
+
 const copyCount = computed(() => props.plan?.copy.length ?? 0)
 const deleteCount = computed(() => props.plan?.delete.length ?? 0)
 const skipCount = computed(() => props.plan?.skip.length ?? 0)
@@ -23,7 +28,7 @@ function formatSize(bytes: number): string {
 </script>
 
 <template>
-  <el-card v-if="plan" shadow="never">
+  <el-card v-if="plan" class="preview-card" shadow="never">
     <template #header><span class="title">同步预览</span></template>
 
     <div class="summary">
@@ -60,31 +65,43 @@ function formatSize(bytes: number): string {
       :image-size="72"
     />
 
-    <el-tabs v-else>
+    <el-tabs v-else class="preview-tabs">
       <el-tab-pane :label="`待复制 (${copyCount})`">
-        <el-table :data="plan.copy" height="300" size="small">
-          <el-table-column
-            prop="targetRelPath"
-            label="目标位置"
-            min-width="200"
-            show-overflow-tooltip
-          />
-          <el-table-column
-            prop="sourceRelPath"
-            label="来源"
-            min-width="200"
-            show-overflow-tooltip
-          />
-          <el-table-column label="大小" width="90">
-            <template #default="{ row }">{{ formatSize(row.size) }}</template>
-          </el-table-column>
-          <el-table-column label="类型" width="80">
-            <template #default="{ row }">
-              <el-tag v-if="row.overwrite" type="warning" size="small">覆盖</el-tag>
-              <el-tag v-else type="success" size="small">新增</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="table-fill">
+          <el-table :data="plan.copy" height="100%" size="small">
+            <el-table-column
+              prop="targetRelPath"
+              label="目标位置"
+              min-width="200"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="sourceRelPath"
+              label="来源"
+              min-width="200"
+              show-overflow-tooltip
+            />
+            <el-table-column label="大小" width="90">
+              <template #default="{ row }">{{ formatSize(row.size) }}</template>
+            </el-table-column>
+            <el-table-column label="类型" width="80">
+              <template #default="{ row }">
+                <el-tag v-if="row.overwrite" type="warning" size="small">覆盖</el-tag>
+                <el-tag v-else type="success" size="small">新增</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="130" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="emit('open', row.sourcePath)"
+                  >打开</el-button
+                >
+                <el-button link type="primary" size="small" @click="emit('reveal', row.sourcePath)"
+                  >文件夹</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-tab-pane>
 
       <el-tab-pane :label="`待删除 (${deleteCount})`">
@@ -95,54 +112,93 @@ function formatSize(bytes: number): string {
           :closable="false"
           class="warn"
         />
-        <el-table :data="plan.delete" height="280" size="small" empty-text="无待删除项">
-          <el-table-column
-            prop="targetRelPath"
-            label="路径"
-            min-width="280"
-            show-overflow-tooltip
-          />
-          <el-table-column label="类型" width="80">
-            <template #default="{ row }">{{ row.isDirectory ? '目录' : '文件' }}</template>
-          </el-table-column>
-          <el-table-column label="原因" width="110">
-            <template #default="{ row }">
-              <el-tag size="small" :type="row.reason === 'extra' ? 'info' : 'danger'">
-                {{ row.reason === 'extra' ? '多余' : '类型冲突' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="table-fill">
+          <el-table :data="plan.delete" height="100%" size="small" empty-text="无待删除项">
+            <el-table-column
+              prop="targetRelPath"
+              label="路径"
+              min-width="280"
+              show-overflow-tooltip
+            />
+            <el-table-column label="类型" width="80">
+              <template #default="{ row }">{{ row.isDirectory ? '目录' : '文件' }}</template>
+            </el-table-column>
+            <el-table-column label="原因" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.reason === 'extra' ? 'info' : 'danger'">
+                  {{ row.reason === 'extra' ? '多余' : '类型冲突' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="130" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="emit('open', row.targetPath)"
+                  >打开</el-button
+                >
+                <el-button link type="primary" size="small" @click="emit('reveal', row.targetPath)"
+                  >文件夹</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-tab-pane>
 
       <el-tab-pane v-if="skipCount" :label="`跳过 (${skipCount})`">
-        <el-table :data="plan.skip" height="280" size="small">
-          <el-table-column
-            prop="sourceRelPath"
-            label="源文件"
-            min-width="200"
-            show-overflow-tooltip
-          />
-          <el-table-column
-            prop="targetRelPath"
-            label="目标已有"
-            min-width="200"
-            show-overflow-tooltip
-          />
-          <el-table-column label="原因" width="130">
-            <template #default="{ row }">
-              <el-tag size="small" type="info">{{
-                row.reason === 'size-mismatch' ? '大小不同' : '类型冲突'
-              }}</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="table-fill">
+          <el-table :data="plan.skip" height="100%" size="small">
+            <el-table-column
+              prop="sourceRelPath"
+              label="源文件"
+              min-width="200"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="targetRelPath"
+              label="目标已有"
+              min-width="200"
+              show-overflow-tooltip
+            />
+            <el-table-column label="原因" width="130">
+              <template #default="{ row }">
+                <el-tag size="small" type="info">{{
+                  row.reason === 'size-mismatch' ? '大小不同' : '类型冲突'
+                }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="130" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="emit('open', row.sourcePath)"
+                  >打开</el-button
+                >
+                <el-button link type="primary" size="small" @click="emit('reveal', row.sourcePath)"
+                  >文件夹</el-button
+                >
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-tab-pane>
     </el-tabs>
   </el-card>
 </template>
 
 <style scoped>
+.preview-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-card > :deep(.el-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .title {
   font-weight: 600;
 }
@@ -156,5 +212,28 @@ function formatSize(bytes: number): string {
 
 .warn {
   margin-bottom: 8px;
+}
+
+.preview-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-tabs > :deep(.el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+}
+
+.preview-tabs > :deep(.el-tabs__content) .el-tab-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-fill {
+  flex: 1;
+  min-height: 0;
 }
 </style>

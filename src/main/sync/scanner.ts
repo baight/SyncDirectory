@@ -99,35 +99,11 @@ export async function scanTree(root: string): Promise<ScanResult> {
   return { files, dirs, warnings }
 }
 
-/** 平铺名映射：relPath → 目标根目录下的文件名。确定性且幂等，冲突时在扩展名前加序号 */
-export function buildFlatNameMap(files: FsEntry[]): {
-  map: Map<string, string>
-  warnings: string[]
-} {
-  const map = new Map<string, string>()
-  const warnings: string[] = []
-  const occupied = new Set<string>() // 存小写形式，Windows 文件名不区分大小写
-
-  // 按码点序排序保证结果确定：路径分隔符(0x5C)小于下划线(0x5F)
-  const sorted = [...files].sort((a, b) =>
-    a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0
-  )
-
-  for (const f of sorted) {
-    const natural = f.relPath.split(/[\\/]+/).join('_')
-    let name = natural
-    if (occupied.has(name.toLowerCase())) {
-      let k = 1
-      do {
-        name = withIndexSuffix(natural, k)
-        k += 1
-      } while (occupied.has(name.toLowerCase()))
-      warnings.push(`平铺重命名：${f.relPath} → ${name}`)
-    }
-    occupied.add(name.toLowerCase())
-    map.set(f.relPath, name)
-  }
-  return { map, warnings }
+/** "名称(大小)"后缀：b.txt + 1024 字节 → b(1024).txt */
+function withSizeSuffix(name: string, size: number): string {
+  const ext = extname(name)
+  const stem = ext ? name.slice(0, -ext.length) : name
+  return `${stem}(${size})${ext}`
 }
 
 function withIndexSuffix(name: string, k: number): string {
@@ -155,7 +131,7 @@ export async function buildPlan(req: PlanRequest): Promise<Omit<SyncPlan, 'planI
   const createDirs: string[] = []
 
   if (req.layoutMode === 'flat') {
-    buildFlatPlan(req, src, tgt, targetDir, copy, del, skip, warnings)
+    buildFlatPlan(req, src, tgt, targetDir, copy, del, warnings)
   } else {
     buildOriginalPlan(req, src, tgt, targetDir, copy, del, skip, createDirs, warnings)
   }
@@ -286,13 +262,7 @@ function buildOriginalPlan(
   for (const sf of src.files) {
     const parentRel = dirname(sf.relPath)
     if (blockedDirRels.has(parentRel)) {
-      skip.push({
-        sourceRelPath: sf.relPath,
-        targetRelPath: sf.relPath,
-        sourceSize: sf.size,
-        targetSize: 0,
-        reason: 'type-mismatch'
-      })
+      skip.push(mkSkip(sf, sf.relPath, 0, targetDir, 'type-mismatch'))
       continue
     }
     const tf = tgtFiles.get(sf.relPath)
@@ -303,24 +273,12 @@ function buildOriginalPlan(
       if (full) {
         copy.push(mkCopy(sf, sf.relPath, targetDir, true))
       } else {
-        skip.push({
-          sourceRelPath: sf.relPath,
-          targetRelPath: sf.relPath,
-          sourceSize: sf.size,
-          targetSize: tf.size,
-          reason: 'size-mismatch'
-        })
+        skip.push(mkSkip(sf, sf.relPath, tf.size, targetDir, 'size-mismatch'))
       }
     } else if (tgtDirs.has(sf.relPath)) {
       // 目标该位置是目录而源是文件：完全同步时 A1 已将其列入删除，此处直接复制
       if (!full) {
-        skip.push({
-          sourceRelPath: sf.relPath,
-          targetRelPath: sf.relPath,
-          sourceSize: sf.size,
-          targetSize: 0,
-          reason: 'type-mismatch'
-        })
+        skip.push(mkSkip(sf, sf.relPath, 0, targetDir, 'type-mismatch'))
         warnings.push(`目标中存在同名目录，无法复制文件：${sf.relPath}`)
       } else {
         copy.push(mkCopy(sf, sf.relPath, targetDir, true))
@@ -328,6 +286,24 @@ function buildOriginalPlan(
     } else {
       copy.push(mkCopy(sf, sf.relPath, targetDir, false))
     }
+  }
+}
+
+function mkSkip(
+  f: FsEntry,
+  targetRelPath: string,
+  targetSize: number,
+  targetDir: string,
+  reason: SkipItem['reason']
+): SkipItem {
+  return {
+    sourcePath: f.absPath,
+    targetPath: join(targetDir, targetRelPath),
+    sourceRelPath: f.relPath,
+    targetRelPath,
+    sourceSize: f.size,
+    targetSize,
+    reason
   }
 }
 
@@ -347,7 +323,10 @@ function mkCopy(
   }
 }
 
-/** 平铺模式：忽略源目录结构，所有文件平铺存到目标根目录 */
+/** 平铺模式：忽略源目录结构，所有文件平铺存到目标根目录。
+ * 命名规则：保留原始文件名；同名冲突（源内多文件同名、或与目标同名但大小不同）时
+ * 用"名称(字节数)"区分，如 b.txt 与 b(1024).txt。
+ * 已同步判定：目标根目录存在同名同大小文件，或存在"名称(大小)"文件 */
 function buildFlatPlan(
   req: PlanRequest,
   src: ScanResult,
@@ -355,14 +334,11 @@ function buildFlatPlan(
   targetDir: string,
   copy: CopyItem[],
   del: DeleteItem[],
-  skip: SkipItem[],
   warnings: string[]
 ): void {
   const full = req.syncMode === 'full'
-  const { map: flatMap, warnings: renames } = buildFlatNameMap(src.files)
-  warnings.push(...renames)
 
-  // 目标根目录下的文件（平铺模式只比较根目录文件）
+  // 目标根目录下的文件（平铺模式只比较根目录文件），键为小写文件名
   const tgtRootFiles = new Map<string, FsEntry>()
   for (const f of tgt.files) {
     if (!f.relPath.includes(sep) && !f.relPath.includes('/')) {
@@ -401,11 +377,79 @@ function buildFlatPlan(
     }
   }
 
-  // 完全同步：目标根目录下不属于源文件集合（按平铺名）的文件删除
+  // 源文件按文件名分组（小写键，Windows 文件名不区分大小写）
+  const groups = new Map<string, FsEntry[]>()
+  for (const f of src.files) {
+    const base = f.relPath.split(/[\\/]/).pop() as string
+    const key = base.toLowerCase()
+    const arr = groups.get(key)
+    if (arr) {
+      arr.push(f)
+    } else {
+      groups.set(key, [f])
+    }
+  }
+
+  const plannedNames = new Set<string>() // 本次计划占用的目标名（小写）
+  const keptNames = new Set<string>() // 完全同步下"已一致"而保留的目标名（小写）
+
+  for (const key of [...groups.keys()].sort()) {
+    const files = groups.get(key)!.sort(byRelPath)
+    const base = files[0].relPath.split(/[\\/]/).pop() as string
+
+    // 源内同名同大小视为同一文件：每个大小只取路径序首个为代表，其余不再复制
+    const reps: FsEntry[] = []
+    const seenSizes = new Set<number>()
+    for (const f of files) {
+      if (!seenSizes.has(f.size)) {
+        seenSizes.add(f.size)
+        reps.push(f)
+      }
+    }
+
+    // 原始名归属：目标已有同名且其大小存在于源中 → 该大小沿用原名；
+    // 目标无同名文件，或完全同步（可覆盖）→ 首个大小用原名；
+    // 否则（增量且目标同名文件大小不在源中）→ 不占用原名，避免覆盖目标已有文件
+    const t = tgtRootFiles.get(key)
+    const plainSize = t && seenSizes.has(t.size) ? t.size : !t || full ? reps[0].size : null
+
+    for (const rep of reps) {
+      // 已同步判定 1：目标根目录存在同名同大小文件
+      if (t && t.size === rep.size) {
+        keptNames.add(key)
+        continue
+      }
+      // 已同步判定 2：目标根目录存在"名称(大小)"文件（此前以冲突名同步过）
+      const suffixed = withSizeSuffix(base, rep.size)
+      const suffixedLc = suffixed.toLowerCase()
+      const ts = tgtRootFiles.get(suffixedLc)
+      if (!plannedNames.has(suffixedLc) && ts && ts.size === rep.size) {
+        keptNames.add(suffixedLc)
+        continue
+      }
+
+      // 需要复制：确定目标名；增量下不与目标根中现有文件重名（防覆盖）
+      let name = rep.size === plainSize ? base : suffixed
+      const blocked = (candidate: string): boolean =>
+        plannedNames.has(candidate) || (!full && tgtRootFiles.has(candidate))
+      if (blocked(name.toLowerCase())) {
+        let k = 1
+        do {
+          name = withIndexSuffix(name, k)
+          k += 1
+        } while (blocked(name.toLowerCase()))
+        warnings.push(`平铺重命名：${rep.relPath} → ${name}`)
+      }
+      plannedNames.add(name.toLowerCase())
+      copy.push(mkCopy(rep, name, targetDir, full && tgtRootFiles.has(name.toLowerCase())))
+    }
+  }
+
+  // 完全同步：目标根目录下既不属计划写入、也非已一致保留的文件视为多余删除
   if (full) {
-    const flatLower = new Set([...flatMap.values()].map((s) => s.toLowerCase()))
     for (const tf of tgtRootFiles.values()) {
-      if (!flatLower.has(tf.relPath.toLowerCase())) {
+      const lc = tf.relPath.toLowerCase()
+      if (!plannedNames.has(lc) && !keptNames.has(lc)) {
         del.push({
           targetPath: tf.absPath,
           targetRelPath: tf.relPath,
@@ -413,26 +457,6 @@ function buildFlatPlan(
           reason: 'extra'
         })
       }
-    }
-  }
-
-  for (const sf of src.files) {
-    const flat = flatMap.get(sf.relPath) as string
-    const tf = tgtRootFiles.get(flat.toLowerCase())
-    if (!tf) {
-      copy.push(mkCopy(sf, flat, targetDir, false))
-    } else if (tf.size === sf.size) {
-      continue
-    } else if (full) {
-      copy.push(mkCopy(sf, flat, targetDir, true))
-    } else {
-      skip.push({
-        sourceRelPath: sf.relPath,
-        targetRelPath: tf.relPath,
-        sourceSize: sf.size,
-        targetSize: tf.size,
-        reason: 'size-mismatch'
-      })
     }
   }
 }

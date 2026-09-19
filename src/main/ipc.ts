@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { JobStatus, PlanRequest, SyncConfigsFile, SyncProgress } from '@shared/sync-types'
 import { ConfigStore, resolveConfigFilePath } from './sync/configStore'
@@ -72,5 +72,16 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('sync:status', (): JobStatus | null => {
     return executor?.running ? executor.status : null
+  })
+
+  ipcMain.handle('shell:openPath', async (_event, p: string) => {
+    const err = await shell.openPath(p)
+    if (err) {
+      throw new Error(err)
+    }
+  })
+
+  ipcMain.handle('shell:showInFolder', (_event, p: string) => {
+    shell.showItemInFolder(p)
   })
 }

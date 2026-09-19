@@ -58,6 +58,8 @@ export interface DeleteItem {
 
 /** 被跳过的源文件（含原因） */
 export interface SkipItem {
+  sourcePath: string
+  targetPath: string
   sourceRelPath: string
   targetRelPath: string
   sourceSize: number
@@ -118,6 +120,10 @@ export interface SyncApi {
   startSync(planId: string): Promise<SyncResult>
   cancelSync(): Promise<{ canceled: boolean }>
   getSyncStatus(): Promise<JobStatus | null>
+  /** 用系统默认程序打开文件/目录，失败时抛出错误 */
+  openPath(path: string): Promise<void>
+  /** 在资源管理器中显示该文件/目录（所在文件夹） */
+  showInFolder(path: string): Promise<void>
   /** 监听同步进度事件，返回解绑函数 */
   onSyncProgress(cb: (p: SyncProgress) => void): () => void
 }

@@ -20,6 +20,8 @@ const api: SyncApi = {
   startSync: (planId: string): Promise<SyncResult> => ipcRenderer.invoke('sync:start', planId),
   cancelSync: (): Promise<{ canceled: boolean }> => ipcRenderer.invoke('sync:cancel'),
   getSyncStatus: (): Promise<JobStatus | null> => ipcRenderer.invoke('sync:status'),
+  openPath: (path: string): Promise<void> => ipcRenderer.invoke('shell:openPath', path),
+  showInFolder: (path: string): Promise<void> => ipcRenderer.invoke('shell:showInFolder', path),
   onSyncProgress: (cb: (p: SyncProgress) => void): (() => void) => {
     const listener = (_event: unknown, p: SyncProgress): void => cb(p)
     ipcRenderer.on('sync:progress', listener)
